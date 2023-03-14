@@ -889,8 +889,10 @@ if (!$oid_root || $oid_root->{ objectID } ne $opts->{ oid }) {
         templates   => [$template],
         triggers    => [],
         graphs      => [],
-        value_maps  => [$valuemaps]
     };
+
+    # Only add value_maps section if there are value mappings present.
+    $output->{value_maps} = [$valuemaps] if %{ $valuemaps };
 
     # Output stream
     my $fh = *STDOUT;
@@ -916,7 +918,7 @@ if (!$oid_root || $oid_root->{ objectID } ne $opts->{ oid }) {
             'trigger_prototypes'    => 'trigger_prototype',
             'graph_prototypes'      => 'graph_prototype',
             'host_prototypes'       => 'host_prototype',
-            'value_maps'            => %{ $valuemaps } ? 'value_map' : undef,
+            'value_maps'            => 'value_map',
             'mappings'              => 'mapping'
         }
     );
