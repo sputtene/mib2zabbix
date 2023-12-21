@@ -23,6 +23,9 @@ Export loaded SNMP MIB OIDs to Zabbix Template XML
     -v, --snmpver=1|2|3         SNMP version (default: 2)
     -p, --port=PORT             SNMP UDP port number (default: 161)
 
+    -d, --mibdir=MIBDIR		Additional MIB directory to include
+    -F, --mibfile=MIBFILE       Additional MIB file to include
+
 SNMP Version 1 or 2c specific
 
     -c, --community=STRING      SNMP community string (default: 'public')
@@ -75,7 +78,6 @@ http://www.webnms.com/snmp/help/snmpapi/snmpv3/table_handling/snmptables_basics.
 
 use strict;
 #use warnings;
-no warnings 'experimental::smartmatch';
 
 use Cwd 'abs_path';
 use Data::Dumper;
@@ -174,8 +176,8 @@ my $snmpv3_sec_protocol_map = {
 
 # Default command line options
 my $opts =  {
-    delay               => '1m',                # 1 minute check interval
-    disc_delay          => '1h',            # Hourly discovery
+    delay               => 60,              # 1 minute check interval
+    disc_delay          => 3600,            # Hourly discovery
     enableitems         => 0,               # Disable items
     group               => 'Templates',
     history             => 7,
@@ -183,6 +185,8 @@ my $opts =  {
     list                => 0,
     maxdepth            => -1,
     oid                 => '.1',
+    mibdir              => '',
+    mibfile             => '',
     use_macros          => 0,
     snmpcomm            => 'public',
     snmpport            => 161,
@@ -207,6 +211,8 @@ GetOptions(
     'N|name=s'              => \$opts->{ name },            # Template name
     'G|group=s'             => \$opts->{ group },           # Template group
     'o|oid=s'               => \$opts->{ oid },             # Root OID to export
+    'd|mibdir=s'            => \$opts->{ mibdir },          # Additional MIB directory to search
+    'F|mibfile=s'           => \$opts->{ mibfile },         # Additional MIB file to search
 
     'e|enable-items'        => \$opts->{ enableitems },     # Enable template items
 
@@ -223,8 +229,8 @@ GetOptions(
     'x|privacy=s'           => \$opts->{ v3sec_protocol },  # SNMPv3 Privacy protocol
     'X|privpass=s'          => \$opts->{ v2sec_pass},       # SNMPv3 Privacy passphrase
 
-    'check-delay=s'         => \$opts->{ delay },           # Update interval in seconds
-    'disc-delay=s'          => \$opts->{ disc_delay },      # Update interval in seconds
+    'check-delay=i'         => \$opts->{ delay },           # Update interval in seconds
+    'disc-delay=i'          => \$opts->{ disc_delay },      # Update interval in seconds
     'history=i'             => \$opts->{ history },         # History retention in days
     'trends=i'              => \$opts->{ trends },          # Trends retention in days
 
@@ -470,6 +476,9 @@ sub node_to_item {
         if (!defined($item->{ value_type })) {
             print STDERR "No type mapping found for type $node->{ type } in $node->{ objectID }\n";
         }
+	if ( $item->{ value_type } =~ '4' ) {
+	    $item->{ trends } = 0;
+	}
     }
 
     # Set storage type to Delta for MIB counter types
@@ -511,7 +520,7 @@ sub node_to_item {
 
         # add template value map
         $valuemaps->{ $map_name }->{ 'mappings' } = [];
-        foreach(sort keys %{ $node->{ enums } }) {
+        foreach(keys %{ $node->{ enums } }) {
             push(@{ $valuemaps->{ $map_name }->{ 'mappings' } }, {
                 'value'     => $node->{ enums }->{ $_ },
                 'newvalue'  => $_
@@ -793,7 +802,11 @@ sub build_template {
             } else {
                 # Remove unrequired fields
                 delete($disc_rule->{ applications });
-                delete($disc_rule->{ data_type });
+                # If passed load specified mib directory
+                &SNMP::addMibDirs( $opts->{ mibdir } );
+                # If passed load specified mib file
+                &SNMP::addMibFiles( $opts->{ mibfile } );
+                SNMP::initMib();delete($disc_rule->{ data_type });
 
                 # Create new array for prototypes
                 $disc_rule->{ item_prototypes } = [];
@@ -829,6 +842,10 @@ sub build_template {
 
 # Initialize net-snmp
 $SNMP::save_descriptions = 1;
+# If passed load specified mib directory
+&SNMP::addMibDirs( $opts->{ mibdir } );
+# If passed load specified mib file
+&SNMP::addMibFiles( $opts->{ mibfile } );
 SNMP::initMib();
 
 # Verify the specified OID exists
@@ -877,7 +894,7 @@ if (!$oid_root || $oid_root->{ objectID } ne $opts->{ oid }) {
     build_template($template, $oid_root, 0);
 
     # Convert applications hash to array
-    @{ $template->{ applications } } = map { { name => $_ } } sort keys %{ $template->{ apptags } };
+    @{ $template->{ applications } } = map { { name => $_ } } keys %{ $template->{ apptags } };
     delete($template->{ apptags });
 
     # Build XML document
@@ -889,10 +906,8 @@ if (!$oid_root || $oid_root->{ objectID } ne $opts->{ oid }) {
         templates   => [$template],
         triggers    => [],
         graphs      => [],
+        value_maps  => [$valuemaps]
     };
-
-    # Only add value_maps section if there are value mappings present.
-    $output->{value_maps} = [$valuemaps] if %{ $valuemaps };
 
     # Output stream
     my $fh = *STDOUT;
@@ -918,7 +933,7 @@ if (!$oid_root || $oid_root->{ objectID } ne $opts->{ oid }) {
             'trigger_prototypes'    => 'trigger_prototype',
             'graph_prototypes'      => 'graph_prototype',
             'host_prototypes'       => 'host_prototype',
-            'value_maps'            => 'value_map',
+            'value_maps'            => %{ $valuemaps } ? 'value_map' : undef,
             'mappings'              => 'mapping'
         }
     );
