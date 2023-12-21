@@ -23,6 +23,9 @@ Export loaded SNMP MIB OIDs to Zabbix Template XML
     -v, --snmpver=1|2|3         SNMP version (default: 2)
     -p, --port=PORT             SNMP UDP port number (default: 161)
 
+    -d, --mibdir=MIBDIR         Additional MIB directory to include
+    -F, --mibfile=MIBFILE       Additional MIB file to include
+
 SNMP Version 1 or 2c specific
 
     -c, --community=STRING      SNMP community string (default: 'public')
@@ -183,6 +186,8 @@ my $opts =  {
     list                => 0,
     maxdepth            => -1,
     oid                 => '.1',
+    mibdir              => '',
+    mibfile             => '',
     use_macros          => 0,
     snmpcomm            => 'public',
     snmpport            => 161,
@@ -207,6 +212,8 @@ GetOptions(
     'N|name=s'              => \$opts->{ name },            # Template name
     'G|group=s'             => \$opts->{ group },           # Template group
     'o|oid=s'               => \$opts->{ oid },             # Root OID to export
+    'd|mibdir=s'            => \$opts->{ mibdir },          # Additional MIB directory to search
+    'F|mibfile=s'           => \$opts->{ mibfile },         # Additional MIB file to search
 
     'e|enable-items'        => \$opts->{ enableitems },     # Enable template items
 
@@ -469,6 +476,9 @@ sub node_to_item {
         $item->{ value_type } = $type_map->{ $node->{ type } };
         if (!defined($item->{ value_type })) {
             print STDERR "No type mapping found for type $node->{ type } in $node->{ objectID }\n";
+        }
+        if ( $item->{ value_type } =~ '4' ) {
+            $item->{ trends } = 0;
         }
     }
 
@@ -829,6 +839,10 @@ sub build_template {
 
 # Initialize net-snmp
 $SNMP::save_descriptions = 1;
+# If passed load specified mib directory
+&SNMP::addMibDirs( $opts->{ mibdir } );
+# If passed load specified mib file
+&SNMP::addMibFiles( $opts->{ mibfile } );
 SNMP::initMib();
 
 # Verify the specified OID exists
